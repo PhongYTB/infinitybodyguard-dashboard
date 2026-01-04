@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InfinityBodyGuard Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loadingScreen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:var(--infinity-dark);z-index:9999;display:flex;justify-content:center;align-items:center;">
+        <div class="loading">
+            <i class="fas fa-shield-alt fa-spin" style="font-size:4rem;color:var(--infinity-red);"></i>
+            <h2 style="margin-top:20px;color:var(--infinity-red);">Loading InfinityBodyGuard Dashboard...</h2>
+        </div>
+    </div>
+
+    <!-- Main Dashboard -->
+    <div class="dashboard-container" id="dashboardApp" style="display:none;">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h2>
+                    <i class="fas fa-shield-alt"></i>
+                    <span>InfinityBodyGuard</span>
+                </h2>
+                <div class="user-info">
+                    <div class="username" id="userUsername">admin</div>
+                    <div class="login-time" id="userLoginTime">Loading...</div>
+                </div>
+            </div>
+            
+            <nav class="nav-menu">
+                <a class="nav-item active" data-tab="dashboard">
+                    <i class="fas fa-tachometer-alt"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a class="nav-item" data-tab="create">
+                    <i class="fas fa-plus-circle"></i>
+                    <span>Create Script</span>
+                </a>
+                <a class="nav-item" data-tab="scripts">
+                    <i class="fas fa-code"></i>
+                    <span>Manage Scripts</span>
+                </a>
+                <a class="nav-item" data-tab="upload">
+                    <i class="fas fa-upload"></i>
+                    <span>Upload File</span>
+                </a>
+                <a class="nav-item" data-tab="history">
+                    <i class="fas fa-history"></i>
+                    <span>History</span>
+                </a>
+                <a class="nav-item" data-tab="settings">
+                    <i class="fas fa-cog"></i>
+                    <span>Settings</span>
+                </a>
+                <a class="nav-item" onclick="logout()" style="margin-top:30px;color:#ff6666;">
+                    <i class="fas fa-sign-out-alt"></i>
+                    <span>Logout</span>
+                </a>
+            </nav>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Header -->
+            <div class="content-header">
+                <h1 id="pageTitle">
+                    <i class="fas fa-tachometer-alt"></i>
+                    <span>Dashboard Overview</span>
+                </h1>
+                <div class="header-actions">
+                    <button class="btn btn-primary" onclick="switchTab('create')">
+                        <i class="fas fa-plus"></i> New Script
+                    </button>
+                    <button class="btn btn-secondary" onclick="loadDashboardStats()">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+            </div>
+
+            <!-- Stats Cards -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <i class="fas fa-code"></i>
+                    <div class="number" id="totalScripts">0</div>
+                    <div class="label">Total Scripts</div>
+                </div>
+                <div class="stat-card">
+                    <i class="fas fa-eye"></i>
+                    <div class="number" id="totalViews">0</div>
+                    <div class="label">Total Views</div>
+                </div>
+                <div class="stat-card">
+                    <i class="fas fa-database"></i>
+                    <div class="number" id="totalSize">0 B</div>
+                    <div class="label">Total Size</div>
+                </div>
+                <div class="stat-card">
+                    <i class="fas fa-shield-alt"></i>
+                    <div class="number">100%</div>
+                    <div class="label">Protection Active</div>
+                </div>
+            </div>
+
+            <!-- Tabs Navigation -->
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+                <button class="tab-btn" data-tab="create">Create Script</button>
+                <button class="tab-btn" data-tab="scripts">Scripts</button>
+                <button class="tab-btn" data-tab="upload">Upload</button>
+                <button class="tab-btn" data-tab="history">History</button>
+                <button class="tab-btn" data-tab="settings">Settings</button>
+            </div>
+
+            <!-- Tab Contents -->
+            <div class="tab-content active" id="tab-dashboard">
+                <div class="main-card">
+                    <h3><i class="fas fa-bolt"></i> Quick Actions</h3>
+                    <div class="form-row" style="margin-top:20px;">
+                        <button class="btn btn-primary" onclick="switchTab('create')">
+                            <i class="fas fa-plus"></i> Create New Script
+                        </button>
+                        <button class="btn btn-secondary" onclick="switchTab('upload')">
+                            <i class="fas fa-upload"></i> Upload Lua File
+                        </button>
+                        <button class="btn btn-secondary" onclick="loadScripts()">
+                            <i class="fas fa-list"></i> View All Scripts
+                        </button>
+                    </div>
+                </div>
+
+                <div class="main-card">
+                    <h3><i class="fas fa-clock"></i> Recent Scripts</h3>
+                    <div id="recentScripts" style="margin-top:20px;">
+                        <div class="loading">
+                            <i class="fas fa-spinner fa-spin"></i>
+                            <p>Loading recent scripts...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Create Script Tab -->
+            <div class="tab-content" id="tab-create">
+                <div class="main-card">
+                    <h3><i class="fas fa-plus-circle"></i> Create New Script</h3>
+                    
+                    <div id="createAlert"></div>
+                    
+                    <form id="createScriptForm" onsubmit="event.preventDefault(); createScript();">
+                        <div class="form-row">
+                            <div class="form-group-vertical">
+                                <label for="newScriptName">
+                                    <i class="fas fa-tag"></i> Script Name
+                                </label>
+                                <input type="text" id="newScriptName" class="form-control" 
+                                       placeholder="my_awesome_script" required>
+                                <small style="color:var(--text-muted);">Only letters, numbers, underscore and hyphen</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group-vertical">
+                                <label for="newScriptCode">
+                                    <i class="fas fa-code"></i> Script Code (Lua)
+                                </label>
+                                <textarea id="newScriptCode" class="code-editor" 
+                                          placeholder="-- Enter your Lua code here
+print('Hello InfinityBodyGuard!')
+-- Your protected script code..." required></textarea>
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <button type="submit" class="btn btn-primary" id="createScriptBtn">
+                                <i class="fas fa-save"></i> Create & Protect Script
+                            </button>
+                            <button type="button" class="btn btn-secondary" onclick="document.getElementById('createScriptForm').reset()">
+                                <i class="fas fa-trash"></i> Clear Form
+                            </button>
+                        </div>
+                    </form>
+                    
+                    <div id="createResult" style="display:none; margin-top:30px;"></div>
+                </div>
+            </div>
+
+            <!-- Scripts Tab -->
+            <div class="tab-content" id="tab-scripts">
+                <div class="main-card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-code"></i> Manage Scripts</h3>
+                        <div>
+                            <input type="text" id="searchScripts" placeholder="Search scripts..." 
+                                   style="padding:10px; background:rgba(0,0,0,0.5); border:1px solid var(--border-color); 
+                                          color:white; border-radius:6px; width:250px;">
+                        </div>
+                    </div>
+                    
+                    <div id="scriptsList">
+                        <div class="loading">
+                            <i class="fas fa-spinner fa-spin"></i>
+                            <p>Loading scripts...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Upload Tab -->
+            <div class="tab-content" id="tab-upload">
+                <div class="main-card">
+                    <h3><i class="fas fa-upload"></i> Upload Lua File</h3>
+                    
+                    <div id="uploadAlert"></div>
+                    
+                    <div class="form-row">
+                        <div class="form-group-vertical">
+                            <label for="uploadScriptName">
+                                <i class="fas fa-tag"></i> Script Name (Optional)
+                            </label>
+                            <input type="text" id="uploadScriptName" class="form-control" 
+                                   placeholder="Will use filename if empty">
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group-vertical">
+                            <label for="fileInput">
+                                <i class="fas fa-file-code"></i> Select Lua File (.lua)
+                            </label>
+                            <input type="file" id="fileInput" accept=".lua" 
+                                   style="padding:15px; background:rgba(0,0,0,0.5); border:2px dashed var(--border-color);
+                                          border-radius:10px; color:white; width:100%;">
+                            <small style="color:var(--text-muted);">Max file size: 5MB | Only .lua files</small>
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group-vertical">
+                            <label>
+                                <i class="fas fa-eye"></i> File Preview
+                            </label>
+                            <div class="code-editor" id="filePreview" 
+                                 style="min-height:150px; max-height:300px; overflow-y:auto;">
+                                -- File content will appear here
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <button class="btn btn-primary" onclick="uploadFile()" id="uploadFileBtn">
+                            <i class="fas fa-upload"></i> Upload & Create Script
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Tab -->
+            <div class="tab-content" id="tab-history">
+                <div class="main-card">
+                    <h3><i class="fas fa-history"></i> Activity History</h3>
+                    <div id="historyList">
+                        <div class="loading">
+                            <i class="fas fa-spinner fa-spin"></i>
+                            <p>Loading history...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Tab -->
+            <div class="tab-content" id="tab-settings">
+                <div class="main-card">
+                    <h3><i class="fas fa-cog"></i> Dashboard Settings</h3>
+                    <p style="color:var(--text-muted); margin:20px 0;">
+                        Settings will be available in the next update.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="script.js"></script>
+    <script>
+        // Show dashboard after loading
+        setTimeout(() => {
+            document.getElementById('loadingScreen').style.display = 'none';
+            document.getElementById('dashboardApp').style.display = 'flex';
+        }, 1000);
+        
+        // Search functionality
+        document.getElementById('searchScripts')?.addEventListener('input', function(e) {
+            const searchTerm = e.target.value.toLowerCase();
+            const scripts = document.querySelectorAll('.script-item');
+            
+            scripts.forEach(script => {
+                const text = script.textContent.toLowerCase();
+                script.style.display = text.includes(searchTerm) ? '' : 'none';
+            });
+        });
+        
+        // Update page title based on tab
+        const pageTitle = document.getElementById('pageTitle');
+        const tabButtons = document.querySelectorAll('.tab-btn');
+        
+        tabButtons.forEach(btn => {
+            btn.addEventListener('click', function() {
+                const tabName = this.getAttribute('data-tab');
+                const iconMap = {
+                    'dashboard': 'fa-tachometer-alt',
+                    'create': 'fa-plus-circle',
+                    'scripts': 'fa-code',
+                    'upload': 'fa-upload',
+                    'history': 'fa-history',
+                    'settings': 'fa-cog'
+                };
+                
+                const names = {
+                    'dashboard': 'Dashboard',
+                    'create': 'Create Script',
+                    'scripts': 'Manage Scripts',
+                    'upload': 'Upload File',
+                    'history': 'Activity History',
+                    'settings': 'Settings'
+                };
+                
+                if (pageTitle) {
+                    pageTitle.innerHTML = `
+                        <i class="fas ${iconMap[tabName] || 'fa-cog'}"></i>
+                        <span>${names[tabName] || 'Dashboard'}</span>
+                    `;
+                }
+            });
+        });
+    </script>
+</body>
+              </html>
