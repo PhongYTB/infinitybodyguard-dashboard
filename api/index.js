@@ -2,125 +2,266 @@ const express = require('express');
 const session = require('express-session');
 const axios = require('axios');
 const path = require('path');
-const cors = require('cors');
-const fs = require('fs').promises;
 require('dotenv').config();
 
 const app = express();
 
-// ==================== FIX QUAN TRỌNG: SERVE STATIC FILES ====================
-const PUBLIC_DIR = path.join(__dirname, '../public');
-
-// Kiểm tra thư mục public tồn tại
-(async () => {
-    try {
-        await fs.access(PUBLIC_DIR);
-        console.log('✅ Public directory exists:', PUBLIC_DIR);
-    } catch (error) {
-        console.log('⚠️ Public directory not found, creating...');
-        await fs.mkdir(PUBLIC_DIR, { recursive: true });
-        
-        // Tạo file index.html mặc định nếu chưa có
-        const defaultHTML = `<!DOCTYPE html>
-        <html>
-        <head><title>InfinityBodyGuard Dashboard</title></head>
-        <body style="background:#0f0f23;color:white;text-align:center;padding:50px;">
-            <h1>InfinityBodyGuard Dashboard</h1>
-            <p>Loading dashboard files...</p>
-            <script>window.location.href = '/dashboard.html';</script>
-        </body>
-        </html>`;
-        
-        await fs.writeFile(path.join(PUBLIC_DIR, 'index.html'), defaultHTML);
-    }
-})();
-
-// ==================== CẤU HÌNH ====================
-app.use(cors({ origin: true, credentials: true }));
+// Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
 app.use(session({
     secret: process.env.SESSION_SECRET || 'infinity_dashboard_secret_2024',
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000, httpOnly: true }
+    cookie: { 
+        secure: false,
+        maxAge: 24 * 60 * 60 * 1000,
+        httpOnly: true
+    }
 }));
 
-// ==================== ROUTE ĐẦU TIÊN: STATIC FILES ====================
-// Serve static files TRƯỚC API routes
-app.use(express.static(PUBLIC_DIR));
+// Biến môi trường
+const INFINITYBODYGUARD_URL = process.env.INFINITYBODYGUARD_URL || 'https://infinitybodyguard.vercel.app';
+const BODYGUARD_SECRET = process.env.BODYGUARD_SECRET;
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'phong123';
 
-// Route cụ thể cho các file HTML
-app.get('/', (req, res) => {
-    res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
-});
-
-app.get('/dashboard.html', (req, res) => {
-    res.sendFile(path.join(PUBLIC_DIR, 'dashboard.html'));
-});
+// 🔐 Middleware kiểm tra đăng nhập
+const requireLogin = (req, res, next) => {
+    if (!req.session.isLoggedIn) {
+        return res.status(401).json({ error: 'Not authenticated' });
+    }
+    next();
+};
 
 // ==================== API ROUTES ====================
 
-// 1. TEST ENDPOINT
-app.get('/api/test', (req, res) => {
-    res.json({ 
-        success: true,
-        message: 'Dashboard API is working!',
-        publicDir: PUBLIC_DIR,
-        files: ['index.html', 'dashboard.html', 'style.css', 'script.js']
-    });
-});
-
-// 2. LOGIN
+// 1. Đăng nhập
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
-    const ADMIN_USER = process.env.ADMIN_USERNAME || 'admin';
-    const ADMIN_PASS = process.env.ADMIN_PASSWORD || 'phong123';
     
-    if (username === ADMIN_USER && password === ADMIN_PASS) {
+    if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
         req.session.isLoggedIn = true;
         req.session.username = username;
-        res.json({ success: true, message: 'Login successful' });
+        req.session.loginTime = new Date();
+        
+        res.json({ 
+            success: true, 
+            message: 'Login successful',
+            user: { 
+                username, 
+                loginTime: req.session.loginTime 
+            }
+        });
     } else {
-        res.status(401).json({ success: false, error: 'Invalid credentials' });
-    }
-});
-
-// 3. CHECK AUTH
-app.get('/api/check-auth', (req, res) => {
-    res.json({ 
-        isLoggedIn: !!req.session.isLoggedIn,
-        username: req.session.username 
-    });
-});
-
-// ==================== 404 HANDLER ====================
-// Nếu không match bất kỳ route nào trên
-app.use((req, res) => {
-    // Kiểm tra nếu request là API
-    if (req.path.startsWith('/api/')) {
-        return res.status(404).json({ 
-            error: `API endpoint ${req.path} not found`,
-            available: ['/api/test', '/api/login', '/api/check-auth']
+        res.status(401).json({ 
+            success: false, 
+            message: 'Invalid username or password' 
         });
     }
+});
+
+// 2. Kiểm tra đăng nhập
+app.get('/api/check-auth', (req, res) => {
+    if (req.session.isLoggedIn) {
+        res.json({ 
+            isLoggedIn: true, 
+            username: req.session.username,
+            loginTime: req.session.loginTime 
+        });
+    } else {
+        res.json({ isLoggedIn: false });
+    }
+});
+
+// 3. Đăng xuất
+app.post('/api/logout', (req, res) => {
+    req.session.destroy();
+    res.json({ success: true, message: 'Logged out' });
+});
+
+// 4. Tạo script mới (gửi lên InfinityBodyGuard)
+app.post('/api/create-script', requireLogin, async (req, res) => {
+    try {
+        const { name, code } = req.body;
+        
+        if (!name || !code) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Script name and code are required' 
+            });
+        }
+        
+        // Gửi script lên InfinityBodyGuard
+        const response = await axios.post(`${INFINITYBODYGUARD_URL}/api/upload`, {
+            scriptName: name,
+            scriptCode: code,
+            secret: BODYGUARD_SECRET
+        });
+        
+        res.json(response.data);
+        
+    } catch (error) {
+        console.error('Create script error:', error.message);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to create script',
+            details: error.response?.data || error.message 
+        });
+    }
+});
+
+// 5. Lấy danh sách script từ InfinityBodyGuard
+app.get('/api/scripts', requireLogin, async (req, res) => {
+    try {
+        const response = await axios.get(`${INFINITYBODYGUARD_URL}/api/scripts`, {
+            params: { secret: BODYGUARD_SECRET }
+        });
+        
+        res.json(response.data);
+        
+    } catch (error) {
+        console.error('Get scripts error:', error.message);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to fetch scripts',
+            details: error.response?.data || error.message 
+        });
+    }
+});
+
+// 6. Xóa script
+app.delete('/api/script/:name', requireLogin, async (req, res) => {
+    try {
+        const { name } = req.params;
+        
+        const response = await axios.delete(`${INFINITYBODYGUARD_URL}/api/script/${name}`, {
+            params: { secret: BODYGUARD_SECRET }
+        });
+        
+        res.json(response.data);
+        
+    } catch (error) {
+        console.error('Delete script error:', error.message);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to delete script',
+            details: error.response?.data || error.message 
+        });
+    }
+});
+
+// 7. Chỉnh sửa script
+app.put('/api/script/:name', requireLogin, async (req, res) => {
+    try {
+        const { name } = req.params;
+        const { code } = req.body;
+        
+        if (!code) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Script code is required' 
+            });
+        }
+        
+        // Để edit: xóa script cũ, tạo script mới với cùng tên
+        // 1. Xóa script cũ
+        await axios.delete(`${INFINITYBODYGUARD_URL}/api/script/${name}`, {
+            params: { secret: BODYGUARD_SECRET }
+        });
+        
+        // 2. Tạo script mới
+        const response = await axios.post(`${INFINITYBODYGUARD_URL}/api/upload`, {
+            scriptName: name,
+            scriptCode: code,
+            secret: BODYGUARD_SECRET
+        });
+        
+        res.json(response.data);
+        
+    } catch (error) {
+        console.error('Edit script error:', error.message);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to edit script',
+            details: error.response?.data || error.message 
+        });
+    }
+});
+
+// 8. Upload file Lua
+app.post('/api/upload-file', requireLogin, async (req, res) => {
+    try {
+        // Lưu ý: Cần cài đặt multer để xử lý file upload
+        // Ở đây tôi xử lý base64 từ frontend để đơn giản
+        
+        const { fileName, fileContent } = req.body;
+        
+        if (!fileName || !fileContent) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'File name and content are required' 
+            });
+        }
+        
+        // Gửi nội dung file lên InfinityBodyGuard
+        const scriptName = fileName.replace('.lua', '');
+        const response = await axios.post(`${INFINITYBODYGUARD_URL}/api/upload`, {
+            scriptName: scriptName,
+            scriptCode: fileContent,
+            secret: BODYGUARD_SECRET
+        });
+        
+        res.json(response.data);
+        
+    } catch (error) {
+        console.error('Upload file error:', error.message);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to upload file',
+            details: error.response?.data || error.message 
+        });
+    }
+});
+
+// 9. Lấy lịch sử (simulated - có thể mở rộng)
+app.get('/api/history', requireLogin, (req, res) => {
+    // Trong thực tế, lưu vào database
+    const history = [
+        {
+            id: 1,
+            action: 'CREATE',
+            scriptName: 'test_script',
+            timestamp: new Date().toISOString(),
+            user: req.session.username
+        },
+        {
+            id: 2,
+            action: 'DELETE',
+            scriptName: 'old_script',
+            timestamp: new Date(Date.now() - 3600000).toISOString(),
+            user: req.session.username
+        }
+    ];
     
-    // Nếu là file không tồn tại, trả về index.html
-    res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+    res.json({ success: true, history });
+});
+
+// ==================== STATIC FILES ====================
+
+// Phục vụ file tĩnh từ thư mục public
+app.use(express.static(path.join(__dirname, '../public')));
+
+// Route mặc định - redirect đến login
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
 // ==================== START SERVER ====================
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`
-╔══════════════════════════════════════╗
-║   🚀 InfinityBodyGuard Dashboard    ║
-╠══════════════════════════════════════╣
-║  Port: ${PORT}                         
-║  Public Dir: ${PUBLIC_DIR}           
-║  Test: http://localhost:${PORT}/api/test
-║  Login: admin / phong123            
-╚══════════════════════════════════════╝
-    `);
+    console.log(`🚀 InfinityBodyGuard Dashboard running on port ${PORT}`);
+    console.log(`👤 Admin: ${ADMIN_USERNAME}`);
+    console.log(`🔗 Connected to: ${INFINITYBODYGUARD_URL}`);
 });
