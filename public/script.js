@@ -1,106 +1,276 @@
-// ===== FIX 1: ĐẢM BẢO API CALLS HOẠT ĐỘNG =====
+// ===== GLOBAL STATE =====
+let dashboardState = {
+    scripts: [],
+    currentTab: 'dashboard',
+    user: null,
+    isLoading: false
+};
 
-// Thay thế tất cả fetch calls bằng version có error handling
-async function safeFetch(url, options = {}) {
-    try {
-        console.log(`📡 Fetching: ${url}`, options.method || 'GET');
-        
-        const response = await fetch(url, {
-            ...options,
-            headers: {
-                'Content-Type': 'application/json',
-                ...options.headers
-            },
-            credentials: 'include' // Quan trọng: gửi session cookie
-        });
-        
-        console.log(`📡 Response: ${response.status} ${url}`);
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`❌ API Error ${response.status}:`, errorText);
-            throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 100)}`);
-        }
-        
-        const data = await response.json();
-        console.log(`✅ API Success:`, data.success !== undefined ? data.success : 'OK');
-        return data;
-        
-    } catch (error) {
-        console.error(`🔥 Fetch failed ${url}:`, error.message);
-        showAlert(`API Error: ${error.message}`, 'error');
-        throw error;
-    }
-}
+// ===== CORE FUNCTIONS =====
 
-// ===== FIX 2: SỬA HÀM CHECK AUTH =====
-async function checkAuth() {
-    try {
-        const data = await safeFetch('/api/check-auth');
-        
-        if (data.isLoggedIn) {
-            dashboardState.user = data;
-            updateUserInfo(data);
-            
-            // Ẩn loading, hiện dashboard
-            document.getElementById('loadingScreen').style.display = 'none';
-            document.getElementById('dashboardApp').style.display = 'flex';
-            
-            // Load dữ liệu ban đầu
-            loadDashboardStats();
-            return true;
-        } else {
-            // Chưa login, redirect về trang đăng nhập
-            window.location.href = '/';
-            return false;
-        }
-    } catch (error) {
-        console.error('Auth check failed, showing login page');
-        window.location.href = '/';
-        return false;
-    }
-}
-
-// ===== FIX 3: SỬA HÀM LOGIN =====
+// 1. LOGIN FUNCTION
 async function login() {
-    const username = document.getElementById('username')?.value;
-    const password = document.getElementById('password')?.value;
+    console.log('🔐 Login function called');
+    
+    const username = document.getElementById('username');
+    const password = document.getElementById('password');
     const btn = document.getElementById('loginBtn');
     
     if (!username || !password) {
+        showAlert('Login form not found!', 'error');
+        return;
+    }
+    
+    const user = username.value.trim();
+    const pass = password.value.trim();
+    
+    if (!user || !pass) {
         showAlert('Please enter username and password', 'error');
         return;
     }
     
+    // Show loading
     const originalText = btn.innerHTML;
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Logging in...';
     
     try {
-        const data = await safeFetch('/api/login', {
+        console.log('📤 Sending login request...');
+        
+        const response = await fetch('/api/login', {
             method: 'POST',
-            body: JSON.stringify({ username, password })
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                username: user,
+                password: pass
+            }),
+            credentials: 'include' // Important for sessions
         });
+        
+        console.log('📥 Login response:', response.status);
+        
+        const data = await response.json();
+        console.log('📊 Login data:', data);
         
         if (data.success) {
             showAlert('Login successful! Redirecting...', 'success');
             
-            // Chuyển hướng sau 1 giây
+            // Redirect to dashboard after 1 second
             setTimeout(() => {
                 window.location.href = '/dashboard.html';
             }, 1000);
+            
         } else {
             showAlert(data.error || 'Login failed', 'error');
         }
+        
     } catch (error) {
-        // Error đã được xử lý trong safeFetch
+        console.error('🔥 Login error:', error);
+        showAlert('Network error: ' + error.message, 'error');
     } finally {
+        // Restore button
         btn.disabled = false;
         btn.innerHTML = originalText;
     }
 }
 
-// ===== FIX 4: SỬA HÀM LOAD SCRIPTS =====
+// 2. CHECK AUTHENTICATION
+async function checkAuth() {
+    try {
+        console.log('🔍 Checking authentication...');
+        
+        const response = await fetch('/api/check-auth', {
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        console.log('🔐 Auth check result:', data);
+        
+        if (data.isLoggedIn) {
+            dashboardState.user = data;
+            
+            // Hide loading screen, show dashboard
+            const loadingScreen = document.getElementById('loadingScreen');
+            const dashboardApp = document.getElementById('dashboardApp');
+            
+            if (loadingScreen) loadingScreen.style.display = 'none';
+            if (dashboardApp) dashboardApp.style.display = 'flex';
+            
+            // Update user info
+            updateUserInfo(data);
+            
+            // Load initial data
+            loadDashboardStats();
+            
+            return true;
+        } else {
+            // Not logged in, redirect to login page
+            if (!window.location.pathname.includes('index.html') && 
+                window.location.pathname !== '/') {
+                window.location.href = '/';
+            }
+            return false;
+        }
+        
+    } catch (error) {
+        console.error('Auth check error:', error);
+        return false;
+    }
+}
+
+// 3. UPDATE USER INFO
+function updateUserInfo(userData) {
+    const usernameEl = document.getElementById('userUsername');
+    const loginTimeEl = document.getElementById('userLoginTime');
+    
+    if (usernameEl && userData.username) {
+        usernameEl.textContent = userData.username;
+    }
+    
+    if (loginTimeEl && userData.loginTime) {
+        const time = new Date(userData.loginTime);
+        loginTimeEl.textContent = time.toLocaleTimeString();
+    }
+}
+
+// 4. LOGOUT
+async function logout() {
+    if (confirm('Are you sure you want to logout?')) {
+        try {
+            await fetch('/api/logout', {
+                method: 'POST',
+                credentials: 'include'
+            });
+            
+            window.location.href = '/';
+        } catch (error) {
+            console.error('Logout error:', error);
+            showAlert('Logout failed', 'error');
+        }
+    }
+}
+
+// 5. SWITCH TAB
+function switchTab(tabName) {
+    console.log('📂 Switching to tab:', tabName);
+    
+    dashboardState.currentTab = tabName;
+    
+    // Update active tab button
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.getAttribute('data-tab') === tabName) {
+            btn.classList.add('active');
+        }
+    });
+    
+    // Update active nav item
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.classList.remove('active');
+        if (item.getAttribute('data-tab') === tabName) {
+            item.classList.add('active');
+        }
+    });
+    
+    // Show active tab content
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+        if (content.id === `tab-${tabName}`) {
+            content.classList.add('active');
+        }
+    });
+    
+    // Update page title
+    const pageTitle = document.getElementById('pageTitle');
+    if (pageTitle) {
+        const icons = {
+            'dashboard': 'fa-tachometer-alt',
+            'create': 'fa-plus-circle',
+            'scripts': 'fa-code',
+            'upload': 'fa-upload',
+            'history': 'fa-history',
+            'settings': 'fa-cog'
+        };
+        
+        const names = {
+            'dashboard': 'Dashboard',
+            'create': 'Create Script',
+            'scripts': 'Manage Scripts',
+            'upload': 'Upload File',
+            'history': 'Activity History',
+            'settings': 'Settings'
+        };
+        
+        pageTitle.innerHTML = `
+            <i class="fas ${icons[tabName] || 'fa-cog'}"></i>
+            <span>${names[tabName] || 'Dashboard'}</span>
+        `;
+    }
+    
+    // Load data for specific tabs
+    if (tabName === 'scripts') {
+        loadScripts();
+    } else if (tabName === 'history') {
+        loadHistory();
+    } else if (tabName === 'dashboard') {
+        loadDashboardStats();
+    }
+}
+
+// 6. LOAD DASHBOARD STATS
+async function loadDashboardStats() {
+    try {
+        console.log('📊 Loading dashboard stats...');
+        
+        // Update script count from state
+        const totalScriptsEl = document.getElementById('totalScripts');
+        if (totalScriptsEl) {
+            totalScriptsEl.textContent = dashboardState.scripts.length;
+        }
+        
+        // Try to load actual scripts
+        const response = await fetch('/api/scripts', {
+            credentials: 'include'
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            
+            if (data.success) {
+                dashboardState.scripts = data.scripts || [];
+                
+                // Update stats
+                if (totalScriptsEl) {
+                    totalScriptsEl.textContent = data.count || dashboardState.scripts.length;
+                }
+                
+                const totalViewsEl = document.getElementById('totalViews');
+                if (totalViewsEl) {
+                    const totalViews = dashboardState.scripts.reduce((sum, script) => 
+                        sum + (script.views || 0), 0);
+                    totalViewsEl.textContent = totalViews.toLocaleString();
+                }
+                
+                const totalSizeEl = document.getElementById('totalSize');
+                if (totalSizeEl) {
+                    const totalSize = dashboardState.scripts.reduce((sum, script) => 
+                        sum + (script.size || 0), 0);
+                    totalSizeEl.textContent = formatBytes(totalSize);
+                }
+                
+                // Show recent scripts
+                showRecentScripts();
+            }
+        }
+        
+    } catch (error) {
+        console.error('Load stats error:', error);
+    }
+}
+
+// 7. LOAD SCRIPTS
 async function loadScripts() {
     const container = document.getElementById('scriptsList');
     if (!container) return;
@@ -113,7 +283,14 @@ async function loadScripts() {
     `;
     
     try {
-        const data = await safeFetch('/api/scripts');
+        console.log('📦 Loading scripts...');
+        
+        const response = await fetch('/api/scripts', {
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        console.log('📦 Scripts response:', data);
         
         if (data.success) {
             dashboardState.scripts = data.scripts || [];
@@ -126,11 +303,13 @@ async function loadScripts() {
                 </div>
             `;
         }
+        
     } catch (error) {
+        console.error('Load scripts error:', error);
         container.innerHTML = `
             <div class="empty-state">
                 <i class="fas fa-exclamation-triangle"></i>
-                <p>Network error. Please check console.</p>
+                <p>Network error: ${error.message}</p>
                 <button class="btn btn-primary mt-3" onclick="loadScripts()">
                     <i class="fas fa-redo"></i> Retry
                 </button>
@@ -139,43 +318,71 @@ async function loadScripts() {
     }
 }
 
-// ===== FIX 5: SỬA HÀM CREATE SCRIPT =====
+// 8. CREATE SCRIPT
 async function createScript() {
-    const name = document.getElementById('newScriptName')?.value.trim();
-    const code = document.getElementById('newScriptCode')?.value.trim();
+    console.log('📝 Create script function called');
     
-    if (!name || !code) {
-        showAlert('Please enter script name and code', 'error');
+    const nameInput = document.getElementById('newScriptName');
+    const codeInput = document.getElementById('newScriptCode');
+    const btn = document.getElementById('createScriptBtn');
+    
+    if (!nameInput || !codeInput || !btn) {
+        showAlert('Create form not found!', 'error');
         return;
     }
     
-    const btn = document.getElementById('createScriptBtn');
+    const name = nameInput.value.trim();
+    const code = codeInput.value.trim();
+    
+    if (!name) {
+        showAlert('Please enter script name', 'error');
+        nameInput.focus();
+        return;
+    }
+    
+    if (!code) {
+        showAlert('Please enter script code', 'error');
+        codeInput.focus();
+        return;
+    }
+    
+    // Show loading
     const originalText = btn.innerHTML;
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating...';
     
     try {
-        const data = await safeFetch('/api/create-script', {
+        console.log('📤 Creating script:', name);
+        
+        const response = await fetch('/api/create-script', {
             method: 'POST',
-            body: JSON.stringify({ name, code })
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ name, code }),
+            credentials: 'include'
         });
+        
+        const data = await response.json();
+        console.log('📥 Create script response:', data);
         
         if (data.success) {
             showAlert('Script created successfully!', 'success');
             
             // Clear form
-            document.getElementById('newScriptName').value = '';
-            document.getElementById('newScriptCode').value = '';
+            nameInput.value = '';
+            codeInput.value = '';
             
             // Show result
             const resultContainer = document.getElementById('createResult');
             if (resultContainer && data.data) {
                 resultContainer.style.display = 'block';
                 resultContainer.innerHTML = `
-                    <h4><i class="fas fa-check-circle text-success"></i> Script Created</h4>
-                    <div class="mt-3">
+                    <div class="alert alert-success">
+                        <h4><i class="fas fa-check-circle"></i> Script Created!</h4>
                         <p><strong>Name:</strong> ${data.data.name}</p>
-                        <p><strong>Raw URL:</strong> <code>${data.data.rawUrl}</code></p>
+                        <p><strong>Raw URL:</strong></p>
+                        <div class="script-url">${data.data.rawUrl}</div>
                         <p><strong>Loadstring:</strong></p>
                         <div class="script-url">${data.data.loadstring}</div>
                         <div class="mt-3">
@@ -183,143 +390,258 @@ async function createScript() {
                                 <i class="fas fa-copy"></i> Copy Loadstring
                             </button>
                             <button class="btn btn-sm btn-secondary" onclick="switchTab('scripts')">
-                                View All Scripts
+                                <i class="fas fa-list"></i> View All Scripts
                             </button>
                         </div>
                     </div>
                 `;
             }
             
-            // Refresh after 2 seconds
+            // Refresh scripts list
             setTimeout(() => {
                 loadScripts();
                 loadDashboardStats();
-            }, 2000);
+            }, 1000);
             
         } else {
             showAlert(data.error || 'Failed to create script', 'error');
         }
+        
     } catch (error) {
-        // Error đã được xử lý
+        console.error('Create script error:', error);
+        showAlert('Network error: ' + error.message, 'error');
     } finally {
+        // Restore button
         btn.disabled = false;
         btn.innerHTML = originalText;
     }
 }
 
-// ===== FIX 6: THÊM DEBUG BUTTON =====
-// Thêm nút debug vào dashboard để test API
-function addDebugButton() {
-    const debugBtn = document.createElement('button');
-    debugBtn.className = 'btn btn-secondary';
-    debugBtn.style.position = 'fixed';
-    debugBtn.style.bottom = '10px';
-    debugBtn.style.left = '10px';
-    debugBtn.style.zIndex = '9999';
-    debugBtn.innerHTML = '<i class="fas fa-bug"></i> Debug';
-    debugBtn.onclick = async () => {
-        console.log('=== DEBUG INFO ===');
-        console.log('Dashboard State:', dashboardState);
-        console.log('Session:', await safeFetch('/api/check-auth'));
-        console.log('API Test:', await safeFetch('/api/test'));
-        showAlert('Check console for debug info', 'info');
-    };
-    document.body.appendChild(debugBtn);
-}
-
-// ===== FIX 7: SỬA HÀM SHOW ALERT =====
-function showAlert(message, type = 'info') {
-    // Tạo hoặc tìm alert container
-    let alertContainer = document.getElementById('globalAlertContainer');
-    if (!alertContainer) {
-        alertContainer = document.createElement('div');
-        alertContainer.id = 'globalAlertContainer';
-        alertContainer.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 99999;
-            max-width: 400px;
-        `;
-        document.body.appendChild(alertContainer);
+// 9. DELETE SCRIPT
+async function deleteScript(scriptName) {
+    if (!confirm(`Are you sure you want to delete "${scriptName}"? This cannot be undone.`)) {
+        return;
     }
     
-    const alertId = 'alert-' + Date.now();
-    const alert = document.createElement('div');
-    alert.id = alertId;
-    alert.className = `alert alert-${type}`;
-    alert.style.cssText = `
-        margin-bottom: 10px;
-        padding: 15px;
-        border-radius: 8px;
-        background: ${type === 'success' ? '#00ff8820' : type === 'error' ? '#ff475720' : '#3498db20'};
-        border: 2px solid ${type === 'success' ? '#00ff88' : type === 'error' ? '#ff4757' : '#3498db'};
-        color: white;
-        animation: slideIn 0.3s ease;
+    try {
+        console.log('🗑️ Deleting script:', scriptName);
+        
+        const response = await fetch(`/api/script/${encodeURIComponent(scriptName)}`, {
+            method: 'DELETE',
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showAlert(`Script "${scriptName}" deleted`, 'success');
+            
+            // Refresh lists
+            loadScripts();
+            loadDashboardStats();
+            
+        } else {
+            showAlert(data.error || 'Delete failed', 'error');
+        }
+        
+    } catch (error) {
+        console.error('Delete script error:', error);
+        showAlert('Network error: ' + error.message, 'error');
+    }
+}
+
+// 10. UPLOAD FILE
+function handleFileUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    // Check file type
+    if (!file.name.endsWith('.lua')) {
+        showAlert('Only .lua files are allowed', 'error');
+        return;
+    }
+    
+    // Check file size (5MB max)
+    if (file.size > 5 * 1024 * 1024) {
+        showAlert('File size must be less than 5MB', 'error');
+        return;
+    }
+    
+    // Read file
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const content = e.target.result;
+        const scriptName = file.name.replace('.lua', '');
+        
+        // Set script name
+        const nameInput = document.getElementById('uploadScriptName');
+        if (nameInput) {
+            nameInput.value = scriptName;
+        }
+        
+        // Show preview
+        const preview = document.getElementById('filePreview');
+        if (preview) {
+            preview.textContent = content.substring(0, 500) + 
+                (content.length > 500 ? '\n... (truncated)' : '');
+        }
+        
+        // Store for upload
+        window.uploadFileData = {
+            name: scriptName,
+            content: content,
+            fileName: file.name
+        };
+    };
+    
+    reader.readAsText(file);
+}
+
+async function uploadFile() {
+    if (!window.uploadFileData) {
+        showAlert('Please select a file first', 'error');
+        return;
+    }
+    
+    const { name, content, fileName } = window.uploadFileData;
+    const btn = document.getElementById('uploadFileBtn');
+    
+    if (!btn) {
+        showAlert('Upload button not found', 'error');
+        return;
+    }
+    
+    // Show loading
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading...';
+    
+    try {
+        console.log('📤 Uploading file:', fileName);
+        
+        const response = await fetch('/api/upload-file', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                fileName: fileName,
+                fileContent: content
+            }),
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        console.log('📥 Upload response:', data);
+        
+        if (data.success) {
+            showAlert('File uploaded successfully!', 'success');
+            
+            // Clear form
+            const fileInput = document.getElementById('fileInput');
+            const nameInput = document.getElementById('uploadScriptName');
+            const preview = document.getElementById('filePreview');
+            
+            if (fileInput) fileInput.value = '';
+            if (nameInput) nameInput.value = '';
+            if (preview) preview.textContent = '-- File content will appear here';
+            
+            delete window.uploadFileData;
+            
+            // Refresh scripts
+            setTimeout(() => {
+                loadScripts();
+                loadDashboardStats();
+            }, 1000);
+            
+        } else {
+            showAlert(data.error || 'Upload failed', 'error');
+        }
+        
+    } catch (error) {
+        console.error('Upload error:', error);
+        showAlert('Network error: ' + error.message, 'error');
+    } finally {
+        // Restore button
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+    }
+}
+
+// 11. LOAD HISTORY
+async function loadHistory() {
+    const container = document.getElementById('historyList');
+    if (!container) return;
+    
+    container.innerHTML = `
+        <div class="loading">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>Loading history...</p>
+        </div>
     `;
     
+    try {
+        const response = await fetch('/api/history', {
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            renderHistoryList(data.history || []);
+        } else {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-history"></i>
+                    <p>${data.error || 'No history available'}</p>
+                </div>
+            `;
+        }
+        
+    } catch (error) {
+        console.error('Load history error:', error);
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-exclamation-triangle"></i>
+                <p>Failed to load history</p>
+            </div>
+        `;
+    }
+}
+
+// ===== HELPER FUNCTIONS =====
+
+// Show alert
+function showAlert(message, type = 'info') {
+    console.log(`📢 Alert [${type}]:`, message);
+    
+    // Remove existing alerts
+    const existing = document.querySelectorAll('.global-alert');
+    existing.forEach(alert => alert.remove());
+    
+    // Create alert
+    const alert = document.createElement('div');
+    alert.className = `global-alert alert alert-${type}`;
     alert.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center;">
             <span>${message}</span>
-            <button onclick="document.getElementById('${alertId}').remove()" 
-                    style="background: none; border: none; color: white; cursor: pointer; font-size: 1.2rem;">
+            <button onclick="this.parentElement.parentElement.remove()" 
+                    style="background: none; border: none; color: inherit; font-size: 1.2rem; cursor: pointer;">
                 &times;
             </button>
         </div>
     `;
     
-    alertContainer.appendChild(alert);
-    
-    // Auto remove after 5 seconds
-    setTimeout(() => {
-        if (document.getElementById(alertId)) {
-            document.getElementById(alertId).remove();
-        }
-    }, 5000);
-}
-
-// ===== FIX 8: INITIALIZATION =====
-document.addEventListener('DOMContentLoaded', async () => {
-    console.log('📋 Dashboard initializing...');
-    
-    // Thêm debug button
-    addDebugButton();
-    
-    // Kiểm tra xem đang ở trang nào
-    const isLoginPage = window.location.pathname === '/' || window.location.pathname === '/index.html';
-    const isDashboardPage = window.location.pathname.includes('dashboard');
-    
-    if (isDashboardPage) {
-        // Trang dashboard: check auth
-        await checkAuth();
-    } else if (isLoginPage) {
-        // Trang login: thêm event listener
-        document.getElementById('loginBtn')?.addEventListener('click', login);
-        document.getElementById('password')?.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') login();
-        });
-        
-        // Ẩn loading screen trên trang login
-        document.getElementById('loadingScreen')?.style.display = 'none';
-    }
-    
-    console.log('✅ Dashboard initialized');
-});
-
-// ===== THÊM CSS CHO ANIMATIONS =====
-const style = document.createElement('style');
-style.textContent = `
-    @keyframes slideIn {
-        from { transform: translateX(100%); opacity: 0; }
-        to { transform: translateX(0); opacity: 1; }
-    }
-    @keyframes fadeIn {
-        from { opacity: 0; }
-        to { opacity: 1; }
-    }
-    .alert-success { background: #00ff8820 !important; border-color: #00ff88 !important; }
-    .alert-error { background: #ff475720 !important; border-color: #ff4757 !important; }
-    .alert-info { background: #3498db20 !important; border-color: #3498db !important; }
-    .alert-warning { background: #f1c40f20 !important; border-color: #f1c40f !important; }
-`;
-document.head.appendChild(style);
+    // Style
+    alert.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        z-index: 99999;
+        min-width: 300px;
+        max-width: 500px;
+        padding: 15px 20px;
+        border-radius: 10px;
+        background: ${type === 'success' ? '#00ff8820' : 
+                     type === 'error' ? '#ff475720' : 
+                     type === 'warning' ? '#ffaa0020' : '#3498db2
